@@ -1,0 +1,35 @@
+# Gate a serving change on qualification before it reaches production.
+name: Qualify inference release
+
+"on":
+  pull_request:
+    paths:
+      - "serving/**"          # engine version, model pin, quantization, config
+      - "release.json"
+
+jobs:
+  qualify:
+    runs-on: [self-hosted, gpu]   # needs the baseline and candidate stacks
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up baseline and candidate stacks
+        run: ./serving/up.sh baseline candidate
+
+      - name: Qualify the change set
+        id: gate
+        uses: ./ci
+        with:
+          manifest: release.json
+          out: qualification
+
+      - name: Publish the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ steps.gate.outputs.verdict }}
+          path: qualification/
+
+# The job fails on BLOCK and on INCONCLUSIVE. Holding on INCONCLUSIVE is the
+# point: a change nobody could measure is not a change anybody verified.

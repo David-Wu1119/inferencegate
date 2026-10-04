@@ -1,0 +1,14 @@
+# Lint config for the release gate. Pinned here so a local run and the CI job
+# apply the same rules; without it ruff inherits whatever config sits above
+# this directory on the developer's machine.
+line-length = 88
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+  "E501",   # long lines in docstrings and f-strings; the formatter owns width
+]
+
+[lint.isort]
+known-first-party = ["release_gate", "grade", "mock_endpoint", "test_qualify_e2e"]

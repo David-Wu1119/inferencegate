@@ -1,0 +1,136 @@
+name: "Inference release qualification"
+description: >
+  Replay a workload against the current and candidate inference stacks, then
+  pass, block, or hold the deploy on a statistically defensible verdict.
+inputs:
+  manifest:
+    description: "Release manifest describing the baseline and each change axis."
+    required: true
+  out:
+    description: "Directory for per-axis runs and the release verdict."
+    required: false
+    default: qualification
+  allow-inconclusive:
+    description: >
+      Let the job pass on INCONCLUSIVE. Off by default: a change nobody could
+      measure is not a change anybody verified. The verdict output stays
+      INCONCLUSIVE and `overridden` is set to true; the measurement is never
+      relabelled as a PASS.
+    required: false
+    default: "false"
+outputs:
+  verdict:
+    description: "PASS, BLOCK, INCONCLUSIVE, or ERROR if it could not run."
+    value: ${{ steps.qualify.outputs.verdict }}
+  overridden:
+    description: "true when the job passed on allow-inconclusive rather than on a PASS."
+    value: ${{ steps.qualify.outputs.overridden }}
+  scope:
+    description: "release, or observed-sessions-diagnostic for a manifest that reports but cannot approve."
+    value: ${{ steps.qualify.outputs.scope }}
+runs:
+  using: composite
+  steps:
+    - id: qualify
+      shell: bash
+      env:
+        GATE_MANIFEST: ${{ inputs.manifest }}
+        GATE_OUT: ${{ inputs.out }}
+        GATE_ALLOW_INCONCLUSIVE: ${{ inputs.allow-inconclusive }}
+        GATE_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -o pipefail
+        report="$GATE_OUT/release_verdict.json"
+        # The report is this invocation's output and nothing else. Whatever an
+        # earlier run left here is removed before the qualifier starts, so a
+        # qualifier that fails before it can clean up cannot hand back an old
+        # PASS. The wrapper does this itself rather than trusting the child.
+        rm -f -- "$report"
+        status=0
+        python3 "$GATE_ACTION_PATH/../scripts/qualify_matrix.py" \
+          --manifest "$GATE_MANIFEST" \
+          --out "$GATE_OUT" || status=$?
+
+        # A crashed qualifier must not read as a policy decision. Without this
+        # guard the verdict below is empty, the case falls through to *) and the
+        # job reports "blocked this change set" for what was an infra failure.
+        if [ ! -f "$report" ]; then
+          echo "verdict=ERROR" >> "$GITHUB_OUTPUT"
+          echo "overridden=false" >> "$GITHUB_OUTPUT"
+          echo "::error::qualification did not run to completion (exit $status);"\
+               "no verdict was produced, so this is an infrastructure failure"\
+               "rather than a decision about the change"
+          exit 1
+        fi
+        verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['verdict'])" \
+          "$report")
+        scope=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('scope', 'release'))" \
+          "$report")
+        echo "scope=$scope" >> "$GITHUB_OUTPUT"
+        # The exit status and the report must tell the same story; a report
+        # the qualifier did not stand behind with its exit code is not a result.
+        case "$verdict" in
+          PASS) want=0 ;; BLOCK) want=1 ;; INCONCLUSIVE) want=2 ;; ERROR) want=3 ;; *) want=-1 ;;
+        esac
+        if [ "$status" -ne "$want" ]; then
+          echo "verdict=ERROR" >> "$GITHUB_OUTPUT"
+          echo "overridden=false" >> "$GITHUB_OUTPUT"
+          echo "::error::qualifier exit status $status disagrees with the report's verdict"\
+               "'$verdict'; this is an infrastructure failure, not a decision about the change"
+          exit 1
+        fi
+        # An override is a deploy decision taken over the measurement, not a
+        # change to it: the verdict output keeps what was measured and the
+        # override is reported beside it.
+        overridden=false
+        if [ "$verdict" = "INCONCLUSIVE" ] && [ "$GATE_ALLOW_INCONCLUSIVE" = "true" ]; then
+          overridden=true
+        fi
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+        echo "overridden=$overridden" >> "$GITHUB_OUTPUT"
+        {
+          echo "## Inference release qualification"
+          echo
+          echo "**Verdict: $verdict** (scope: $scope)"
+          if [ "$scope" != "release" ]; then
+            echo
+            echo "**Diagnostic manifest.** Observed-sessions analysis only; it" \
+                 "reports and cannot approve a release."
+          fi
+          if [ "$overridden" = "true" ]; then
+            echo
+            echo "**Deploy override applied.** The measured verdict is INCONCLUSIVE" \
+                 "and stays INCONCLUSIVE; the job passes only because" \
+                 "\`allow-inconclusive\` is set."
+          fi
+          echo
+          python3 -c "
+        import json,sys
+        d=json.load(open(sys.argv[1]))
+        print('| axis | change | verdict | detail |')
+        print('|---|---|---|---|')
+        for a in d['axes']:
+            detail='blocked by '+', '.join(a['blocked_by']) if a['blocked_by'] else (
+                   'held by '+', '.join(a['held_by']) if a['held_by'] else
+                   (a.get('error') or '').strip().splitlines()[-1][:70] if a.get('error') else '')
+            print(f\"| {a['axis']} | {a['name']} | {a['verdict']} | {detail} |\")
+        " "$report"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        case "$verdict" in
+          PASS) exit 0 ;;
+          INCONCLUSIVE)
+            if [ "$overridden" = "true" ]; then
+              echo "::warning::qualification was INCONCLUSIVE; the job passes on the"\
+                   "allow-inconclusive override, not on a PASS"
+              exit 0
+            fi
+            echo "::error::qualification was inconclusive; run more repeats or widen the margin"
+            exit 1 ;;
+          BLOCK) echo "::error::qualification blocked this change set"; exit 1 ;;
+          ERROR)
+            echo "::error::qualification did not complete on at least one axis;"\
+                 "this is an infrastructure failure, not a decision about the change"
+            exit 1 ;;
+          *) echo "::error::unrecognised verdict '$verdict'"; exit 1 ;;
+        esac
