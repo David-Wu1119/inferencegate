@@ -1,18 +1,27 @@
-# Gate a serving change on qualification before it reaches production.
+# Copy into .github/workflows/ only in a private execution repository.
+# Never attach the GPU runner to a public repository or execute PR code on it.
 name: Qualify inference release
 
 "on":
-  pull_request:
-    paths:
-      - "serving/**"          # engine version, model pin, quantization, config
-      - "release.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   qualify:
+    # This guard runs before a self-hosted runner is assigned.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.event.repository.private == true &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: [self-hosted, gpu]   # needs the baseline and candidate stacks
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Bring up baseline and candidate stacks
         run: ./serving/up.sh baseline candidate

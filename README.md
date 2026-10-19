@@ -13,8 +13,25 @@ No certification or universal false-PASS guarantee is claimed.
 Supported scope is the normal replay/qualification path exercised by the suite.
 The inherited replay CLI also exposes legacy `--retry-invalid`/`--retry-feedback`
 research options. They require excluded repair-analysis modules and are not
-supported by this minimal package. The example workflow is a template requiring
-your own trusted serving stacks and release manifest, not a runnable hosted demo.
+supported by this minimal package.
+
+## GPU workflow trust boundary
+
+The [example workflow](ci/example-workflow.yml) is a template, not an installed
+workflow or a runnable hosted demo. Copy it into `.github/workflows/` only in a
+private execution repository containing your reviewed serving stacks, gate source
+and trusted release manifest. It accepts only manual `workflow_dispatch` runs on
+that repository's default branch; the job rejects public repositories and other
+branches before assigning a runner. Checkout uses the dispatch's exact commit SHA,
+with a read-only token and no persisted Git credentials.
+
+Never attach a self-hosted GPU runner to a public repository or run untrusted
+pull-request code on it. Use GitHub-hosted runners for untrusted pull-request
+checks. Anyone allowed to change the private default branch can execute arbitrary
+code through the serving scripts or command manifest: these guards do not sandbox
+that code. Review it before dispatch, use an isolated disposable runner without
+production credentials, and do not add PR triggers or PR-head checkout to this
+template. See [GitHub's self-hosted runner security guidance](https://docs.github.com/en/actions/concepts/runners/self-hosted-runners).
 
 The composite action fails closed unless its explicitly documented inconclusive
 override is enabled. Command manifests intentionally execute shell commands:
