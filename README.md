@@ -10,6 +10,24 @@ Only localhost networking is used by the suite. Mock latency and quality are
 simulated; these checks are not measurements of a real model or production system.
 No certification or universal false-PASS guarantee is claimed.
 
+## Automated checks
+
+[Synthetic checks](https://github.com/David-Wu1119/inferencegate/actions/workflows/checks.yml) runs the existing suite on
+GitHub-hosted Ubuntu 24.04 with Python 3.11, 3.12 and 3.13 for pushes to `main`
+and pull requests. It uses read-only permissions, pinned Node 24 Actions and no
+self-hosted runner, GPU, model download or deployment credentials.
+
+Before the suite, CI checks that the GPU workflow template keeps its private,
+manual-only trust boundary. Repeat that static check locally with:
+
+```bash
+python3 scripts/test_workflow_safety.py ci/example-workflow.yml
+```
+
+This additional policy check uses Ruby's standard-library YAML parser as a test
+tool. Ruby is already on the hosted image; the gate runtime and
+`bash run_gate_tests.sh` still require only Python and its standard library.
+
 Supported scope is the normal replay/qualification path exercised by the suite.
 The inherited replay CLI also exposes legacy `--retry-invalid`/`--retry-feedback`
 research options. They require excluded repair-analysis modules and are not
