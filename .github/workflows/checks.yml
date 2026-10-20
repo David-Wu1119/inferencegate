@@ -31,7 +31,9 @@ jobs:
           ruby --version
 
       - name: Check GPU workflow trust boundary
-        run: python scripts/test_workflow_safety.py ci/example-workflow.yml
+        run: |
+          python scripts/test_workflow_safety.py ci/example-workflow.yml
+          python scripts/test_workflow_safety.py --self-test ci/example-workflow.yml
 
       - name: Run synthetic gate suite
         run: bash run_gate_tests.sh
