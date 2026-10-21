@@ -22,7 +22,10 @@ manual-only trust boundary. Repeat that static check locally with:
 
 ```bash
 python3 scripts/test_workflow_safety.py ci/example-workflow.yml
+python3 scripts/test_workflow_safety.py --self-test ci/example-workflow.yml
 ```
+
+The self-test derives eight known-unsafe variants from the template, among them a pull-request trigger, a job-level permission override, a second checkout and a `run:` step that fetches pull-request code, and requires the policy to reject every one. The check is a regression guard for this template, not a sandbox: anyone who can edit the private default branch can still run arbitrary code.
 
 This additional policy check uses Ruby's standard-library YAML parser as a test
 tool. Ruby is already on the hosted image; the gate runtime and
